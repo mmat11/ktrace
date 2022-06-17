@@ -48,7 +48,7 @@ func (e *Event) UnmarshalBinary(t *Tracer, data []byte) error {
 	return nil
 }
 
-func (e *Event) String() string {
+func (e *Event) Raw() []byte {
 	b, _ := json.Marshal(e)
-	return string(b)
+	return b
 }

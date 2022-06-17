@@ -6,14 +6,17 @@ import (
 	"strings"
 )
 
-func funcs() ([]string, error) {
-	syms := make([]string, 0)
+// https://git.kernel.org/pub/scm/linux/kernel/git/jolsa/perf.git/tree/tools/testing/selftests/bpf/prog_tests/kprobe_multi_test.c?h=bpf/multi_funcs_fix_3&id=2d673c9de8a4bde0075bdc78395f86aa363cacde#n325
+func funcs() (map[string]uint64, error) {
+	syms := make(map[string]uint64, 0)
 
 	f, err := os.Open("/sys/kernel/debug/tracing/available_filter_functions")
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
+
+	var cookie uint64
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
@@ -22,10 +25,20 @@ func funcs() ([]string, error) {
 		if len(ll) > 1 {
 			continue
 		}
+		if strings.Contains(ll[0], "arch_cpu_idle") {
+			continue
+		}
+		if strings.Contains(ll[0], "rcu_") {
+			continue
+		}
+		if strings.Contains(ll[0], "__ftrace_invalid_address__") {
+			continue
+		}
 		if _, ok := invalid[ll[0]]; ok {
 			continue
 		}
-		syms = append(syms, ll[0])
+		syms[ll[0]] = cookie
+		cookie++
 	}
 
 	return syms, nil

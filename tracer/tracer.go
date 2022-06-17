@@ -2,11 +2,11 @@ package tracer
 
 import (
 	"errors"
-	"fmt"
 	"regexp"
 
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
+	"github.com/rs/zerolog"
 )
 
 type Config struct {
@@ -14,6 +14,7 @@ type Config struct {
 }
 
 type Tracer struct {
+	logger    zerolog.Logger
 	ringbuf   *ringbuf.Reader
 	kml, krml link.Link
 	// cookie->sym mapping
@@ -28,7 +29,7 @@ func (t *Tracer) Close() {
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go bpf ../bpf/ktrace.c
 
-func New(c *Config) (*Tracer, error) {
+func New(c *Config, logger zerolog.Logger) (*Tracer, error) {
 	objs := bpfObjects{}
 	if err := loadBpfObjects(&objs, nil); err != nil {
 		return nil, err
@@ -41,6 +42,7 @@ func New(c *Config) (*Tracer, error) {
 	}
 
 	t := &Tracer{
+		logger:  logger,
 		ringbuf: rb,
 		refs:    make(map[uint64]string, 0),
 	}
@@ -55,19 +57,20 @@ func New(c *Config) (*Tracer, error) {
 	opts.Cookies = make([]uint64, 0)
 
 	if c.Filter == nil {
-		fmt.Printf("warning: no func filter will most likely KO your pc!\n")
+		logger.Warn().Msg("recording without filter is very slow and could crash the system!")
 	}
 
-	for i, sym := range syms {
+	for sym, cookie := range syms {
 		if c.Filter != nil && !c.Filter.MatchString(sym) {
 			continue
 		}
 
-		cookie := uint64(i)
 		opts.Symbols = append(opts.Symbols, sym)
 		opts.Cookies = append(opts.Cookies, cookie)
 		t.refs[cookie] = sym
 	}
+
+	logger.Info().Int("symbols", len(opts.Symbols)).Send()
 
 	kml, err := link.KprobeMulti(objs.KprobeGeneric, &opts)
 	if err != nil {
@@ -93,15 +96,15 @@ func (t *Tracer) Record() {
 			if errors.Is(err, ringbuf.ErrClosed) {
 				return
 			}
-			fmt.Printf("ringbuf read: %v\n", err)
+			t.logger.Err(err).Send()
 			continue
 		}
 
 		if err := ev.UnmarshalBinary(t, record.RawSample); err != nil {
-			fmt.Printf("unmarshal event: %v\n", err)
+			t.logger.Err(err).Send()
 			return
 		}
 
-		fmt.Println(ev.String())
+		t.logger.Log().RawJSON("event", ev.Raw()).Send()
 	}
 }

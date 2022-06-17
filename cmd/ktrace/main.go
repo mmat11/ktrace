@@ -10,11 +10,14 @@ import (
 	"syscall"
 
 	"github.com/cilium/ebpf/rlimit"
+	"github.com/rs/zerolog"
 
 	"github.com/mmat11/ktrace/tracer"
 )
 
 func main() {
+	logger := zerolog.New(os.Stdout).With().Timestamp().Logger()
+
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
@@ -30,14 +33,12 @@ func main() {
 	flag.Parse()
 
 	if err := rlimit.RemoveMemlock(); err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+		logger.Fatal().Err(err).Send()
 	}
 
-	t, err := tracer.New(c)
+	t, err := tracer.New(c, logger)
 	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+		logger.Fatal().Err(err).Send()
 	}
 	defer t.Close()
 
