@@ -1,9 +1,11 @@
 #include "vmlinux.h"
 #include "bpf_helpers.h"
 
+volatile const uint32_t self;
+
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 65536 * 1024);
+    __uint(max_entries, 65536 * 8 * 1024);
 } ringbuf SEC(".maps");
 
 enum ev_kind {
@@ -27,10 +29,15 @@ static int trace_generic(struct pt_regs *ctx, enum ev_kind kind, int ret) {
     }
 
     ev->kind = kind;
-    ev->pid = bpf_get_current_pid_tgid();
+    ev->pid = bpf_get_current_pid_tgid() >> 32;
     ev->cookie = bpf_get_attach_cookie(ctx);
     ev->usec = bpf_ktime_get_boot_ns() / 1000;
     ev->retval = ret;
+
+    if (ev->pid == 0 || ev->pid == self) {
+        bpf_ringbuf_discard(ev, 0);
+        return 0;
+    }
 
     bpf_ringbuf_submit(ev, 0);
 

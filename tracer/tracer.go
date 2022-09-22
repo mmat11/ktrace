@@ -2,6 +2,7 @@ package tracer
 
 import (
 	"errors"
+	"os"
 	"regexp"
 
 	"github.com/cilium/ebpf/link"
@@ -30,8 +31,16 @@ func (t *Tracer) Close() {
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go bpf ../bpf/ktrace.c
 
 func New(c *Config, logger zerolog.Logger) (*Tracer, error) {
+	spec, err := loadBpf()
+	if err != nil {
+		return nil, err
+	}
+	if err := spec.RewriteConstants(map[string]interface{}{"self": uint32(os.Getpid())}); err != nil {
+		return nil, err
+	}
+
 	objs := bpfObjects{}
-	if err := loadBpfObjects(&objs, nil); err != nil {
+	if err := spec.LoadAndAssign(&objs, nil); err != nil {
 		return nil, err
 	}
 	defer objs.Close()
@@ -57,7 +66,7 @@ func New(c *Config, logger zerolog.Logger) (*Tracer, error) {
 	opts.Cookies = make([]uint64, 0)
 
 	if c.Filter == nil {
-		logger.Warn().Msg("recording without filter is very slow and could crash the system!")
+		logger.Warn().Msg("recording without filter could crash the system!")
 	}
 
 	for sym, cookie := range syms {
@@ -72,13 +81,13 @@ func New(c *Config, logger zerolog.Logger) (*Tracer, error) {
 
 	logger.Info().Int("symbols", len(opts.Symbols)).Send()
 
-	kml, err := link.KprobeMulti(objs.KprobeGeneric, &opts)
+	kml, err := link.KprobeMulti(objs.KprobeGeneric, opts)
 	if err != nil {
 		return nil, err
 	}
 	t.kml = kml
 
-	krml, err := link.KretprobeMulti(objs.KretprobeGeneric, &opts)
+	krml, err := link.KretprobeMulti(objs.KretprobeGeneric, opts)
 	if err != nil {
 		return nil, err
 	}
